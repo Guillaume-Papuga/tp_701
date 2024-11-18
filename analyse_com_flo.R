@@ -14,19 +14,14 @@
 
 # A. Packages
 require(ade4)
+require(adiv)
 require(BiodiversityR)
 require(dplyr)
 require(here)
 require(ggplot2)
 require(vegan)
-
-
-install.packages("stringi")
-install.packages("htmlTable")
-install.packages("Hmisc")
-install.packages("RcmdrMisc")
-install.packages("BiodiversityR")
-
+require(FD)
+require(reshape2)
 
 # B. Charger les donnees de communautés floristiques
 data_flore = read.csv(here::here("data", "com_2024.csv"), # upload data
@@ -171,7 +166,6 @@ par(mfrow = c(1, 1))  # Une seule fenêtre graphique
 # Est ce que l’échantillonnage a été suffisamment exhaustif, pour la méthode utilisée ?
 
 
-
 ### 3.D. Richesse estimée du bois de Montmaur
 # Plusieurs fonctions permettent d'estimer la richesse en espèces extrapolée
 # dans un pool d'espèces, ou le nombre d'espèces non observées. 
@@ -242,86 +236,165 @@ esimp = diversity(data_especes, "simpson")/(1-(1/sr))
 # 5. Diversité foctionnelle
 #####
 
-# Charger les données de traits fonctionnels
+# Visualiser les données de traits fonctionnels
+data_trait
 
-trait = read.table(file.choose(), sep= , dec=, header=, row.names= )
+# Ajouter les traits des autres années
 
-# moyenner la valeur du trait quantitatif pour les 3 individus mesurés sur une espèce (utiliser les noms corrects de variables)
-trait1=aggregate(trait$chlo ~ espece, data = trait, mean)
+### 5.A. Trait quantitatif
+# Trait moyen (moyenner la valeur du trait quantitatif pour les 3 individus mesurés sur une espèce)
+trait_moy_chlo = aggregate(data_trait$chlo ~ code_espece, data = data_trait, mean)
+colnames (trait_moy_chlo) [2] = "chloro"
 
-# Indice CWM (Community Weighted Mean)
-require(weimea)
-icwm = cwm(data_especes,trait1)
+# Utiliser intersect() pour obtenir les colonnes communes
+codes_sp_communes = intersect(colnames(p), trait_moy_chlo$code_espece)
 
+# selectionner les colonnes qui ont des traits dispos
+mt = data_especes[, (colnames(data_especes) %in% colonnes_communes)] # selectionne les communes
+mt_ordo = mt[, sort(colnames(mt))] # trier les données
+abondance_plot = rowSums(p1_ordo) # vecteur pour calcul de pourcentage
+
+# trait des espèces communes
+trait_reduit = trait_moy_chlo[trait_moy_chlo$code_espece %in% colonnes_communes,] # selectionne les communes
+trait_ordo = trait_reduit[order(trait_reduit$code_espece), ] # trier les données
+#row.names(trait_ordo) = trait_ordo$code_espece
+
+# calcul la matrice de trait
+cwm = (rowSums(mt * t(trait_ordo$chloro)))/abondance_plot
+
+### 5.B. Trait qualitatif
+# table des types biologiques
+type_raunkiaer = unique (data_trait[, c("code_espece", "type_biologique")]) %>%
+  arrange(code_espece) %>%
+  filter (code_espece %in% codes_sp_communes)
+
+# transformer la matrice en binaire
+mt_bin = mt_ordo 
+mt_bin[mt_bin>0]=1
+
+# Mettre les relevés en format long
+releves_long = mt_bin %>%
+  mutate (site = data_flore$code_rel) %>%
+  melt() %>%
+  filter (value >0) %>%
+  left_join(type_raunkiaer, by = c("variable" = "code_espece")) %>%
+  group_by(site, type_biologique) %>%
+  mutate (nsp = sum(value)) %>%
+  arrange (site)
+
+table(releves_long$site, releves_long$type_biologique)
+
+
+### 5.C. Synthèse quantitatif - qualitatif
 # Distances fonctionnelles dij entre espèces mesurées à partir des deux traits
-require(FD)
-d = gowdis(trait)
+dist_matrix = gowdis(data_trait[, c("chlorophylle", "type_biologique")])
 
-#Classification fonctionnelle des espèces (complémentarité-redondance) avec CAH (lien moyen) sur Gower
-plot(hclust(d, "average"), hang=-1) 
+# Classification fonctionnelle des espèces (complémentarité-redondance) avec CAH (lien moyen) sur Gower
+hc <- hclust(dist_matrix)
+plot(hc, hang = -1)
+
+# Code la variable type biologique
+type_bio = factor(data_trait$type_biologique)
+couleurs <- c("red", "blue", "green", "purple", "yellow")[type_bio]
+
+points(x = 1:length(hc$order), y = rep(-0.1, length(hc$order)), 
+       col = couleurs[hc$order], pch = 19, cex = 1.5)
+
 
 # Entropie Quadratique (extension de 1-D avec dij)
-require(adiv)
-qe = QE(data_especes,d)
+# Tab 
+jdd = t(mt_ordo)
 
+# Tab
+tab_traits_entro = trait_ordo %>%
+  left_join(type_raunkiaer, by = c("code_espece" = "code_espece"))
+row.names(tab_traits_entro) = tab_traits_entro$code_espece
+tab_traits_entro = tab_traits_entro %>% select (-code_espece)
+
+# Dist traits
+d_entro = gowdis(tab_traits_entro)
+
+# Calcul de l'EQ
+qe = QE(mt_ordo, d_entro, formula="QE")
+
+
+#####
+# 6. Effet de variables explicatives
+#####
+# 6.A. Correlation entre variables réponses
 # Disposer dans une meme matrice les 6 indices
+mat_synth = cbind (sr, N, Nmax, bg, simp, simpc, esimp)
 
 # Realiser un Draftsman plot pour étudier leur relation (ie redondance empirique ou non)
+pairs(mat_synth)
 
+# Alterate
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
 
+pairs(mat_synth, lower.panel = panel.smooth, upper.panel = panel.cor,
+      gap=0, row1attop=FALSE)
 
-
-#3.2) Effet de variables explicatives
-
-# Creer 4 sous figures (ie 4 indices, ou 6 avec indices fonctionnels) pour les 3 effets suivants. Pour les tests récupérer scripts des UEs DESINF et EVA) :
-
-# 3.2.1) Effet du versant
+# 6.B. Effet du versant
 # boxplot() versant + t.test() (vérifier hypothèses et orienter plus précisément le test)
 
 par(mfrow=c(2,2))
-boxplot(sr~versant)
-boxplot(bg~versant)
-boxplot(simpc~versant)
-boxplot(esimp~versant)
+boxplot(sr~versant, main = "SR")
+boxplot(bg~versant, main = "BG")
+boxplot(simpc~versant, main = "SIMPC")
+boxplot(esimp~versant, main = "ESIMP")
+par(mfrow=c(1,1))
+
 
 # Données moyennes et sd pour chaque modalité d'une variable qualitative
+# SR
 round(tapply(sr,versant, mean),2)
 round(tapply(sr,versant, sd), 2)
 
+# BG
 round(tapply(bg,versant, mean),2)
 round(tapply(bg,versant, sd), 2)
 
+# Simpc
 round(tapply(simpc,versant, mean),2)
 round(tapply(simpc,versant, sd), 2)
 
+# Esimp
 round(tapply(esimp,versant, mean),2)
 round(tapply(esimp,versant, sd), 2)
 
 # Test statistique de comparaison de 2 moyennes (cf script UEs DESINF et/ou EVA)
+# SR
+t.test(sr~versant)
+
+# BG
+
+# Simpc
+
+# Esimp
 
 
-# 3.2.2) Effet du recouvrement arboré
-#plot()  vs recouvrement arboré + lm et correlation si lien linéaire
+# 6.C. Effet du recouvrement arboré
+# plot() vs recouvrement arboré + lm et correlation si lien linéaire
 
+# SR
+## plot basique
 plot(sr ~ rec_espece_dominante_arboree)
 scatter.smooth(sr ~ rec_espece_dominante_arboree, span = 2/3, degree = 2)
 
-# A faire également que pour recouvrement chene vert et pin d'alep
+## Analyse ANCOVA
+db_sr = cbind(data_flore, sr) %>%
+  filter(espece_arbre_dominante %in% c("QUEILE", "PINHAL"))
 
-
-# 3.2.3) Effet du recouvrement comparé en versant sud et nord
-
-#indices vs recouvrement en fonction du versant -> ANCOVA
-#etc.
-
-# 3.2.4) Effet recouvrement arbres dominants
-
-#boxplot S vs arbres dominants + anova() (vérifier hypothèses et orienter plus précisément le test)
-# etc.
-
-
-
-#Comment se structure la diversité alpha en fonction des variables explicatives ?
+mod = lm(sr~ rec_espece_dominante_arboree + versant, data = db_sr)
+summary(mod)
 
 
 #####
@@ -330,63 +403,42 @@ scatter.smooth(sr ~ rec_espece_dominante_arboree, span = 2/3, degree = 2)
 
 ### 7.A. Diversité béta taxonomique
 
-#3.2.1.1) Globale
-#Décomposition Gamma en beta et alpha moyen pour en déduire la béta, pour la zone, par versant, entre chacun des 3 réplicats pour un groupe donné.
-#Est ce que la composition en espèces globalement au sein de la zone d’étude, par versant
-
+# Décomposition Gamma en beta et alpha moyen pour en déduire la béta, pour la zone, par versant, entre chacun des 3 réplicats pour un groupe donné.
+# Est ce que la composition en espèces globalement au sein de la zone d’étude, par versant
 # Realiser le calcul avec le modele multiplicatif
 
 
-#3.2.1.2) Inter-quadra
-#Données présence-absence : Jaccard
-
+# 7.A.1. Données présence-absence : Jaccard
 # Jaccard-PCoA (MDS)
-require(vegan)
 jac = vegdist(data_especes,"jaccard")
 
-library(plotly)
-gom = as.matrix(jac)
-gom
-plot_ly(x=colnames(gom), y=rownames(gom), data_especes = gom, type = "heatmap")
-plot_ly(x=colnames(gom), y=rownames(gom), data_especes = gom, type = "heatmap", colorscale= "Earth")
-
-#PCoA
-pcbc = dudi.pco(jac)
+# PCoA
+pcjac = dudi.pco(jac, nf = 2)
+pcjac
 
 # axes percentages
-pourc = round((pcbc$eig/sum(pcbc$eig))*100,2)
+pourc = round((pcjac$eig/sum(pcjac$eig))*100,2)
 pourc
 cumsum(pourc)
 
 # Projections of samples
-s.label(pcbc$li, sub="Jaccard")
+s.label(pcjac$li, sub="Jaccard")
 
 # Projections of samples according to factorial variables
 par(mfrow = c(1,2))
-s.class(pcbc$li, versant, col=c(1:4))
-s.class(pcbc$li, zone, col=c(1:3))
+s.class(pcjac$li, factor(versant), col=c(1:4))
+s.class(pcjac$li, factor(zone), col=c(1:3))
+par(mfrow = c(1,1))
+
+# Clustering
+
 
 # A posteriori projection of variables contribution (species correlations to axes)
 require(ape)
-pcobc=pcoa(jac)
-biplot(pcobc, data_especes)
+pcojac = pcoa(jac)
+biplot(pcojac, data_especes)
 
+# 7.A.2. Données d'abondance
 # Données de recouvrement : idem ci-dessus avec Bray-Curtis method="bray"
 
-
-### 7.A. Diversité béta taxonomique
-
-#3.2.2.1) Globale
-
-# Entropie quadratique 
-
-require(adiv)
-discomQE(data_especes, d, structrures=versant) 
-
-# voir aussi
-require(picante)
-raoD(data_especes, d) 
-
-# 4) Biais d’échantillonnage
-# boxplot RS sur 3 relevés pour différentes zones en fonction du groupe matin /aprem
 
