@@ -5,7 +5,7 @@
 ############################################################################################
 # Ateliers de terrain - Diversité des communautés floristiques du nord de Montpellier
 # Enseignants : Guillaume Papuga & Bastien Mérigot
-# TP novembre 2021
+# TP novembre 2024
 ############################################################################################
 
 #####
@@ -59,8 +59,8 @@ dim(sud)
 dim(nord)
 
 # Tableau uniquement avec especes
-data_especes_sud = sud[,20:ncol(sud)]
-data_especes_nord = nord[,20:ncol(nord)]
+data_especes_sud = sud[,11:ncol(sud)]
+data_especes_nord = nord[,11:ncol(nord)]
 
 dim(data_especes_sud)
 dim(data_especes_nord)
@@ -117,8 +117,11 @@ table.value(data_especes_nord, clegend=0 )
 plot_n = rowSums(data_especes > 0)
 
 # Plot
+plot(plot_n)
 plot(sort(plot_n, decreasing = T), 
      main = "Richesse des plots")
+
+sum(colSums(data_especes)>0)
 
 ###	3.B. Richesse totale echantillonnée
 dim(data_especes)
@@ -144,10 +147,12 @@ round(sp$sd[n_plot],2) # ecart type
 ## Nord
 sp_n  =  specaccum(data_especes_nord, "random", permutations = nrow(data_especes_nord))
 plot(sp_n, ci.type="poly", col="blue", lwd=2, ci.lty=0, ci.col="lightblue")
+round(sp_n$richness[nrow(data_especes_nord)],2) # richesse 
 
 ## Sud
 sp_s  =  specaccum(data_especes_sud, "random", permutations = nrow(data_especes_sud))
 plot(sp_s, ci.type="poly", col="blue", lwd=2, ci.lty=0, ci.col="lightblue")
+round(sp_s$richness[nrow(data_especes_sud)],2) # richesse 
 
 # Richesse rarifiée à n=30 quadras
 round(sp_n$richness[30],2)
@@ -200,7 +205,7 @@ radfit(ndata_especes_sud)
 plot(radfit(ndata_especes_sud))
 
 radfit(ndata_especes_nord)
-plot(radfit(ndata_especes_nordd))
+plot(radfit(ndata_especes_nord))
 
 #####
 # 4. Diversité alpha
@@ -232,6 +237,88 @@ simpc  =  (N/(N-1))*diversity(data_especes, "simpson")
 # Equitabilité Simpson 1-D / (1- 1/S)
 esimp = diversity(data_especes, "simpson")/(1-(1/sr))
 
+# 4.B. Correlation entre variables réponses
+# Disposer dans une meme matrice les 6 indices
+mat_synth = cbind (sr, N, Nmax, bg, simp, simpc, esimp)
+
+# Realiser un Draftsman plot pour étudier leur relation (ie redondance empirique ou non)
+pairs(mat_synth)
+
+# Alterate
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+
+pairs(mat_synth, lower.panel = panel.smooth, upper.panel = panel.cor,
+      gap=0, row1attop=FALSE)
+
+
+
+#####
+# 6. Effet de variables explicatives
+#####
+
+# 6.B. Effet du versant
+# boxplot() versant + t.test() (vérifier hypothèses et orienter plus précisément le test)
+
+par(mfrow=c(2,2))
+boxplot(sr~versant, main = "SR")
+boxplot(bg~versant, main = "BG")
+boxplot(simpc~versant, main = "SIMPC")
+boxplot(esimp~versant, main = "ESIMP")
+par(mfrow=c(1,1))
+
+
+# Données moyennes et sd pour chaque modalité d'une variable qualitative
+# SR
+round(tapply(sr,versant, mean),2)
+round(tapply(sr,versant, sd), 2)
+
+# BG
+round(tapply(bg,versant, mean),2)
+round(tapply(bg,versant, sd), 2)
+
+# Simpc
+round(tapply(simpc,versant, mean),2)
+round(tapply(simpc,versant, sd), 2)
+
+# Esimp
+round(tapply(esimp,versant, mean),2)
+round(tapply(esimp,versant, sd), 2)
+
+# Test statistique de comparaison de 2 moyennes (cf script UEs DESINF et/ou EVA)
+# SR
+t.test(sr~versant)
+
+# BG
+
+# Simpc
+
+# Esimp
+
+
+# 6.C. Effet du recouvrement arboré
+# plot() vs recouvrement arboré + lm et correlation si lien linéaire
+
+# SR
+## plot basique
+plot(sr ~ rec_espece_dominante_arboree)
+scatter.smooth(sr ~ rec_espece_dominante_arboree, span = 2/3, degree = 2)
+
+## Analyse ANCOVA
+db_sr = cbind(data_flore, sr) %>%
+  filter(espece_arbre_dominante %in% c("QUEILE", "PINHAL"))
+
+mod = lm(sr~ rec_espece_dominante_arboree + versant, data = db_sr)
+summary(mod)
+
+
 #####
 # 5. Diversité foctionnelle
 #####
@@ -250,12 +337,12 @@ colnames (trait_moy_chlo) [2] = "chloro"
 codes_sp_communes = intersect(colnames(p), trait_moy_chlo$code_espece)
 
 # selectionner les colonnes qui ont des traits dispos
-mt = data_especes[, (colnames(data_especes) %in% colonnes_communes)] # selectionne les communes
+mt = data_especes[, (colnames(data_especes) %in% codes_sp_communes)] # selectionne les communes
 mt_ordo = mt[, sort(colnames(mt))] # trier les données
-abondance_plot = rowSums(p1_ordo) # vecteur pour calcul de pourcentage
+abondance_plot = rowSums(mt_ordo) # vecteur pour calcul de pourcentage
 
 # trait des espèces communes
-trait_reduit = trait_moy_chlo[trait_moy_chlo$code_espece %in% colonnes_communes,] # selectionne les communes
+trait_reduit = trait_moy_chlo[trait_moy_chlo$code_espece %in% codes_sp_communes,] # selectionne les communes
 trait_ordo = trait_reduit[order(trait_reduit$code_espece), ] # trier les données
 #row.names(trait_ordo) = trait_ordo$code_espece
 
@@ -318,102 +405,19 @@ d_entro = gowdis(tab_traits_entro)
 qe = QE(mt_ordo, d_entro, formula="QE")
 
 
-#####
-# 6. Effet de variables explicatives
-#####
-# 6.A. Correlation entre variables réponses
-# Disposer dans une meme matrice les 6 indices
-mat_synth = cbind (sr, N, Nmax, bg, simp, simpc, esimp)
-
-# Realiser un Draftsman plot pour étudier leur relation (ie redondance empirique ou non)
-pairs(mat_synth)
-
-# Alterate
-panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
-{
-  par(usr = c(0, 1, 0, 1))
-  r <- abs(cor(x, y))
-  txt <- format(c(r, 0.123456789), digits = digits)[1]
-  txt <- paste0(prefix, txt)
-  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
-  text(0.5, 0.5, txt, cex = cex.cor * r)
-}
-
-pairs(mat_synth, lower.panel = panel.smooth, upper.panel = panel.cor,
-      gap=0, row1attop=FALSE)
-
-# 6.B. Effet du versant
-# boxplot() versant + t.test() (vérifier hypothèses et orienter plus précisément le test)
-
-par(mfrow=c(2,2))
-boxplot(sr~versant, main = "SR")
-boxplot(bg~versant, main = "BG")
-boxplot(simpc~versant, main = "SIMPC")
-boxplot(esimp~versant, main = "ESIMP")
-par(mfrow=c(1,1))
-
-
-# Données moyennes et sd pour chaque modalité d'une variable qualitative
-# SR
-round(tapply(sr,versant, mean),2)
-round(tapply(sr,versant, sd), 2)
-
-# BG
-round(tapply(bg,versant, mean),2)
-round(tapply(bg,versant, sd), 2)
-
-# Simpc
-round(tapply(simpc,versant, mean),2)
-round(tapply(simpc,versant, sd), 2)
-
-# Esimp
-round(tapply(esimp,versant, mean),2)
-round(tapply(esimp,versant, sd), 2)
-
-# Test statistique de comparaison de 2 moyennes (cf script UEs DESINF et/ou EVA)
-# SR
-t.test(sr~versant)
-
-# BG
-
-# Simpc
-
-# Esimp
-
-
-# 6.C. Effet du recouvrement arboré
-# plot() vs recouvrement arboré + lm et correlation si lien linéaire
-
-# SR
-## plot basique
-plot(sr ~ rec_espece_dominante_arboree)
-scatter.smooth(sr ~ rec_espece_dominante_arboree, span = 2/3, degree = 2)
-
-## Analyse ANCOVA
-db_sr = cbind(data_flore, sr) %>%
-  filter(espece_arbre_dominante %in% c("QUEILE", "PINHAL"))
-
-mod = lm(sr~ rec_espece_dominante_arboree + versant, data = db_sr)
-summary(mod)
-
 
 #####
 # 7. Composition des communautés & Diversité béta
 #####
 
-### 7.A. Diversité béta taxonomique
-
-# Décomposition Gamma en beta et alpha moyen pour en déduire la béta, pour la zone, par versant, entre chacun des 3 réplicats pour un groupe donné.
-# Est ce que la composition en espèces globalement au sein de la zone d’étude, par versant
-# Realiser le calcul avec le modele multiplicatif
-
+### 7.A. Diversité béta taxonomique (pairwise)
 
 # 7.A.1. Données présence-absence : Jaccard
 # Jaccard-PCoA (MDS)
 jac = vegdist(data_especes,"jaccard")
 
 # PCoA
-pcjac = dudi.pco(jac, nf = 2)
+pcjac = dudi.pco(jac, nf = 2, scannf = FALSE)
 pcjac
 
 # axes percentages
@@ -425,9 +429,8 @@ cumsum(pourc)
 s.label(pcjac$li, sub="Jaccard")
 
 # Projections of samples according to factorial variables
-par(mfrow = c(1,2))
+par(mfrow = c(1,1))
 s.class(pcjac$li, factor(versant), col=c(1:4))
-s.class(pcjac$li, factor(zone), col=c(1:3))
 par(mfrow = c(1,1))
 
 # Clustering
